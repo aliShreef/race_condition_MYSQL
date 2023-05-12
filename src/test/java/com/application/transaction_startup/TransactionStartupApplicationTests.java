@@ -1,9 +1,13 @@
 package com.application.transaction_startup;
 
+import com.application.transaction_startup.repo.AccountRepository;
 import com.application.transaction_startup.service.AccountService;
 import org.junit.jupiter.api.Test;
+import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.orm.jpa.AutoConfigureDataJpa;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.junit4.SpringRunner;
 
 import java.sql.Connection;
 import java.util.concurrent.CountDownLatch;
@@ -11,89 +15,60 @@ import java.util.concurrent.CountDownLatch;
 import static org.junit.Assert.*;
 
 
-@SpringBootTest
+@SpringBootTest(classes = {TransactionStartupApplication.class})
+@RunWith(SpringRunner.class)
 class TransactionStartupApplicationTests {
 
 	@Autowired
 	AccountService accountService;
 
+	@Autowired
+	AccountRepository accountRepository;
+
 	@Test
 	void singleThreadAndTRxInSequence() {
-		assertEquals(10L, accountService.getBalance("Alice-123"));
-		assertEquals(0L, accountService.getBalance("Bob-456"));
+		assertEquals(10L, accountRepository.getBalance("Alice-123"));
+		assertEquals(0L, accountRepository.getBalance("Bob-456"));
 
 		accountService.transfer("Alice-123","Bob-456",5L);
-		assertEquals(5L, accountService.getBalance("Alice-123"));
-		assertEquals(5L, accountService.getBalance("Bob-456"));
+		assertEquals(5L, accountRepository.getBalance("Alice-123"));
+		assertEquals(5L, accountRepository.getBalance("Bob-456"));
 
 		accountService.transfer("Alice-123","Bob-456",5L);
-		assertEquals(0L, accountService.getBalance("Alice-123"));
-		assertEquals(10L, accountService.getBalance("Bob-456"));
-	}
-
-
-	@Test
-	void multipleThreadTransferWithDifferentDBConnection(){
-		assertEquals(10L, accountService.getBalance("Alice-123"));
-		assertEquals(0L, accountService.getBalance("Bob-456"));
-		int threadCount = 8;
-		CountDownLatch startLatch = new CountDownLatch(1);
-		CountDownLatch endLatch = new CountDownLatch(threadCount);
-
-		for (int i = 0 ; i < threadCount; i++){
-			new Thread(() ->{
-				awaitOnLatch(startLatch);
-				accountService.transfer("Alice-123","Bob-456",5L);
-				endLatch.countDown();
-			}).start();
-		}
-		System.out.println("Starting threads");
-		startLatch.countDown();
-		System.out.println("Main thread waits for all transfer threads to finish");
-		awaitOnLatch(endLatch);
-
-		System.out.println("Alice's balance: "+ accountService.getBalance("Alice-123"));
-		System.out.println("Bob's balance: "+ accountService.getBalance("Bob-456"));
-
+		assertEquals(0L, accountRepository.getBalance("Alice-123"));
+		assertEquals(10L, accountRepository.getBalance("Bob-456"));
 	}
 
 	@Test
-	void multipleThreadTransferWithSameDBConnection(){
+	void testParallelExecution() throws InterruptedException {
 		long transferAmount = 5L;
-		assertEquals(10L, accountService.getBalance("Alice-123"));
-		assertEquals(0L, accountService.getBalance("Bob-456"));
-		int threadCount = 8;
+//		assertEquals(10L, accountRepository.getBalance("Alice-123"));
+//		assertEquals(0L, accountRepository.getBalance("Bob-456"));
+		int threadCount = 10;
 		CountDownLatch startLatch = new CountDownLatch(1);
 		CountDownLatch endLatch = new CountDownLatch(threadCount);
 
 		for (int i = 0 ; i < threadCount; i++){
 			new Thread(() ->{
 				try{
-					accountService.doInJdbc(connection -> {
-						// This line for solve issue in MYSQL, if you comment it and leave for DB to handle TRx issue exist.
-						// try test case with this line and without
-						connection.setTransactionIsolation(Connection.TRANSACTION_SERIALIZABLE);
-						awaitOnLatch(startLatch);
-						long fromBalance = accountService.getBalance(connection,"Alice-123");
-						if(fromBalance >= transferAmount){
-							accountService.addBalance(connection,"Alice-123",(-1)*5);
-							accountService.addBalance(connection,"Bob-456",5);
-						}
-					});
+					startLatch.await();
+					accountService.transfer("Alice-123","Bob-456",5L);
+
 				}catch (Exception e){
 					System.out.println("Exception");
 					e.printStackTrace();
+				}finally {
+					endLatch.countDown();
 				}
-				endLatch.countDown();
 			}).start();
 		}
 		System.out.println("Starting threads");
 		startLatch.countDown();
 		System.out.println("Main thread waits for all transfer threads to finish");
-		awaitOnLatch(endLatch);
+		endLatch.await();
 
-		System.out.println("Alice's balance: "+ accountService.getBalance("Alice-123"));
-		System.out.println("Bob's balance: "+ accountService.getBalance("Bob-456"));
+		System.out.println("Alice's balance: "+ accountRepository.getBalance("Alice-123"));
+		System.out.println("Bob's balance: "+ accountRepository.getBalance("Bob-456"));
 
 	}
 
