@@ -2,7 +2,7 @@
 race condition example with MySQL DB
 
 # DB configuration
-1- create Database with name "TRx" as in property file or create your Database with name you choose and update the preoprty file
+1- create Database with name "TRx" as in property file or create your Database with name you choose and update the preoprty file [^2]
 2- run DB_script to create table and insert dummy data
 
 # Test cases 
